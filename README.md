@@ -14,7 +14,7 @@ taoSync 是一个文件同步管理工具，支持多存储之间的文件同步
 
 ## 安装
 
-1. 从 [Releases](https://github.com/OpenListTeam/taosync-Magisk/releases) 下载最新版本的 zip 文件
+1. 从 [Releases](https://github.com/ojbkxc/taosync-Magisk/releases) 下载最新版本的 zip 文件
 2. Magisk App → 模块 → 从本地安装
 3. 重启设备
 
@@ -39,7 +39,10 @@ taoSync 是一个文件同步管理工具，支持多存储之间的文件同步
 | `TAO_PORT` | `8023` | Web 服务端口 |
 | `TAO_EXPIRES` | `2` | 登录过期时间（小时） |
 | `TAO_LOG_LEVEL` | `1` | 日志级别 |
+| `TAO_CONSOLE_LEVEL` | `2` | 控制台日志级别 |
 | `TAO_LOG_SAVE` | `7` | 日志保留天数 |
+| `TAO_TASK_SAVE` | `0` | 任务记录保留天数 |
+| `TAO_TASK_TIMEOUT` | `72` | 任务超时时间（小时） |
 
 ## 目录
 
