@@ -1,0 +1,6 @@
+*.zip
+*.tar.gz
+*.tgz
+build/
+.idea/
+.DS_Store

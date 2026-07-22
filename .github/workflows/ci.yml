@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep '^version=' module.prop | cut -d'=' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      - name: Clone taoSync
+        run: |
+          git clone https://github.com/dr34m/taosync.git /tmp/taosync
+          cd /tmp/taosync
+          echo "taoSync cloned at commit: $(git log --pretty=format:'%h' -1)"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+
+      - name: Build frontend
+        working-directory: /tmp/taosync/web
+        run: |
+          npm ci
+          npm run build
+          echo "Frontend built"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build taoSync with PyInstaller + StaticX
+        working-directory: /tmp/taosync
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential zlib1g-dev patchelf binutils
+          python -m pip install --upgrade pip
+          python -m pip install setuptools wheel scons hatchling
+          python -m pip install --no-build-isolation "pyinstaller>=6,<7" staticx
+          python -m pip install -r requirements.txt
+
+          python -m PyInstaller taoSync.spec --distpath dist --workpath build --noconfirm
+          staticx dist/taoSync dist/taoSync_StaticX
+          mv -f dist/taoSync_StaticX dist/taoSync
+          chmod 755 dist/taoSync
+          echo "Build done: $(file dist/taoSync)"
+
+      - name: Copy binary to Magisk module
+        run: |
+          cp /tmp/taosync/dist/taoSync system/bin/taosync
+          chmod +x system/bin/taosync
+          echo "Binary copied to system/bin/taosync"
+
+      - name: Package
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          zip -r taoSync-Magisk-${VERSION}-ci.zip . \
+            -x ".git/*" \
+            -x ".github/*" \
+            -x ".gitignore"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taoSync-Magisk-CI
+          path: taoSync-Magisk-*-ci.zip

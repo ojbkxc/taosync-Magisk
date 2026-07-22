@@ -1,0 +1,136 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 v1.0.1)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG_VERSION="${{ github.event.inputs.version }}"
+          else
+            TAG_VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "tag=$TAG_VERSION" >> $GITHUB_OUTPUT
+
+          VERSION=${TAG_VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          IFS='.' read -ra PARTS <<< "$VERSION"
+          VERSION_CODE=0
+          for i in "${!PARTS[@]}"; do
+            MULT=$((10 ** (6 - i * 3)))
+            VERSION_CODE=$((VERSION_CODE + PARTS[i] * MULT))
+          done
+          echo "versionCode=$VERSION_CODE" >> $GITHUB_OUTPUT
+
+          sed -i "s/^version=.*/version=$VERSION/" module.prop
+          sed -i "s/^versionCode=.*/versionCode=$VERSION_CODE/" module.prop
+
+          echo "Updated to $TAG_VERSION (code: $VERSION_CODE)"
+
+      - name: Clone taoSync
+        run: |
+          git clone https://github.com/dr34m/taosync.git /tmp/taosync
+          cd /tmp/taosync
+          echo "taoSync cloned at commit: $(git log --pretty=format:'%h' -1)"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+
+      - name: Build frontend
+        working-directory: /tmp/taosync/web
+        run: |
+          npm ci
+          npm run build
+          echo "Frontend built"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build taoSync with PyInstaller + StaticX
+        working-directory: /tmp/taosync
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential zlib1g-dev patchelf binutils
+          python -m pip install --upgrade pip
+          python -m pip install setuptools wheel scons hatchling
+          python -m pip install --no-build-isolation "pyinstaller>=6,<7" staticx
+          python -m pip install -r requirements.txt
+
+          python -m PyInstaller taoSync.spec --distpath dist --workpath build --noconfirm
+          staticx dist/taoSync dist/taoSync_StaticX
+          mv -f dist/taoSync_StaticX dist/taoSync
+          chmod 755 dist/taoSync
+          echo "Build done: $(file dist/taoSync)"
+
+      - name: Copy binary to Magisk module
+        run: |
+          cp /tmp/taosync/dist/taoSync system/bin/taosync
+          chmod +x system/bin/taosync
+          echo "Binary copied to system/bin/taosync"
+
+      - name: Package
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          zip -r taoSync-Magisk-${VERSION}.zip . \
+            -x ".git/*" \
+            -x ".github/*" \
+            -x ".gitignore"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taoSync-Magisk-${{ steps.version.outputs.version }}
+          path: taoSync-Magisk-${{ steps.version.outputs.version }}.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: taoSync Magisk ${{ steps.version.outputs.tag }}
+          body: |
+            ## taoSync Magisk ${{ steps.version.outputs.version }}
+
+            基于 taoSync 源码编译的 Magisk 模块，开机自启动 taoSync 同步服务。
+
+            ### 功能
+            - 开机自启动 taoSync 同步服务
+            - 进程守护（崩溃自动重启）
+            - Web 管理面板 (端口 8023)
+            - 默认密码 `admin`
+            - 支持 Magisk v20.4+
+            - 基于 taoSync 源码编译 (arm64, PyInstaller + StaticX)
+
+            ### 安装
+            1. 下载 `taoSync-Magisk-${{ steps.version.outputs.version }}.zip`
+            2. 通过 Magisk 刷入
+            3. 重启设备
+            4. 浏览器访问 `http://设备IP:8023`
+
+            ### 配置
+            - 配置目录：`/data/adb/taosync/data/`
+            - 日志文件：`/data/adb/taosync/taosync.log`
+          files: taoSync-Magisk-${{ steps.version.outputs.version }}.zip
+          draft: false
+          prerelease: false
