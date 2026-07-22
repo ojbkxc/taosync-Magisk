@@ -10,6 +10,7 @@ MODDIR=${0%/*}
 CONF_DIR=/data/adb/taosync
 LOG_FILE="$CONF_DIR/taosync.log"
 DATA_DIR="$CONF_DIR/data"
+TMP_DIR="$CONF_DIR/tmp"
 
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG_FILE"
@@ -17,22 +18,50 @@ log() {
 
 mkdir -p "$CONF_DIR"
 mkdir -p "$DATA_DIR"
+mkdir -p "$TMP_DIR"
+chmod 1777 "$TMP_DIR"
+export TMPDIR="$TMP_DIR"
+
+# 创建 /tmp 符号链接指向数据分区（PyInstaller 硬编码了 /tmp 路径）
+if [ -L /tmp ]; then
+  link_target=$(readlink /tmp)
+  if [ "$link_target" != "$TMP_DIR" ]; then
+    rm -f /tmp
+    ln -s "$TMP_DIR" /tmp
+    log "更新 /tmp 符号链接 -> $TMP_DIR"
+  fi
+elif [ -d /tmp ]; then
+  rm -rf /tmp
+  ln -s "$TMP_DIR" /tmp
+  log "替换 /tmp 目录为符号链接 -> $TMP_DIR"
+else
+  ln -s "$TMP_DIR" /tmp
+  log "创建 /tmp 符号链接 -> $TMP_DIR"
+fi
 
 log "=== service.sh 启动 ==="
 
 # 查找 taoSync 二进制
-TAOSYNC_BIN="$MODDIR/taosync_bin"
-if [ ! -f "$TAOSYNC_BIN" ]; then
+TAOSYNC_BIN=""
+if [ -f "$MODDIR/taosync_bin" ]; then
+  TAOSYNC_BIN="$MODDIR/taosync_bin"
+elif [ -f "/system/bin/taosync" ]; then
+  TAOSYNC_BIN="/system/bin/taosync"
+else
   log "错误: 未找到 taoSync 二进制文件"
   exit 1
 fi
 
+chmod 755 "$TAOSYNC_BIN" 2>/dev/null
 log "二进制: $TAOSYNC_BIN"
 log "数据目录: $DATA_DIR"
+log "/tmp -> $(readlink /tmp)"
 
 # 启动函数
 start_taosync() {
   mkdir -p "$DATA_DIR"
+  mkdir -p "$TMP_DIR"
+  chmod 1777 "$TMP_DIR"
   cd "$CONF_DIR"
   TAO_PASSWORD=admin \
   TAO_PORT=8023 \
