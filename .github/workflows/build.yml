@@ -74,26 +74,56 @@ jobs:
           npm run build
           echo "Frontend built"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
         with:
-          python-version: "3.11"
+          platforms: all
 
-      - name: Build taoSync with PyInstaller + StaticX
-        working-directory: taosync
+      - name: Build taoSync with PyInstaller + StaticX in Docker
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends build-essential zlib1g-dev patchelf binutils
-          python -m pip install --upgrade pip
-          python -m pip install "setuptools>=70,<80" "wheel>=0.44,<1" "scons>=4,<5" "hatchling>=1,<2"
-          python -m pip install --no-build-isolation "pyinstaller>=6,<7" "staticx>=0.14,<1"
-          python -m pip install -r requirements.txt
+          IMG="arm64v8/python:3.11-slim-bullseye"
+          LIB="/usr/lib/aarch64-linux-gnu"
 
-          python -m PyInstaller taoSync.spec --distpath dist --workpath build --noconfirm
-          staticx dist/taoSync dist/taoSync_StaticX
-          mv -f dist/taoSync_StaticX dist/taoSync
-          chmod 755 dist/taoSync
-          echo "Build done: $(file dist/taoSync)"
+          docker run --rm \
+            --platform "linux/arm64" \
+            -v "$(pwd)/taosync:/app" \
+            -w /app \
+            -e LIB_PATH="${LIB}" \
+            "${IMG}" \
+            sh -c '
+              set -e
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                build-essential \
+                zlib1g-dev \
+                patchelf \
+                binutils
+              rm -rf /var/lib/apt/lists/*
+
+              python -m pip install --upgrade pip
+              python -m pip install setuptools wheel scons hatchling
+              python -m pip install --no-build-isolation "pyinstaller>=6,<7" staticx
+              python -m pip install -r requirements.txt
+
+              export LD_LIBRARY_PATH="/usr/local/lib:${LIB_PATH}"
+              python -m PyInstaller taoSync.spec \
+                --distpath dist \
+                --workpath build \
+                --noconfirm
+
+              staticx "dist/taoSync" "dist/taoSync_StaticX"
+              mv -f "dist/taoSync_StaticX" "dist/taoSync"
+              chmod 755 "dist/taoSync"
+            '
+
+      - name: Verify build artifact
+        run: |
+          if [ ! -f "taosync/dist/taoSync" ]; then
+            echo "::error::构建产物 taosync/dist/taoSync 不存在"
+            exit 1
+          fi
+          echo "构建产物验证通过"
+          echo "文件类型: $(file taosync/dist/taoSync)"
 
       - name: Copy binary to Magisk module
         run: |
