@@ -45,26 +45,93 @@ jobs:
 
           echo "Updated to $TAG_VERSION (code: $VERSION_CODE)"
 
-      - name: Download taoSync Linux ARM64 StaticX binary
+      - name: Show taoSync source info
         run: |
-          # 使用源项目的最新 release
-          TAOSYNC_VERSION=$(curl -fsSL https://api.github.com/repos/dr34m-cn/taosync/releases/latest | jq -r '.tag_name')
-          echo "taoSync version: $TAOSYNC_VERSION"
+          cd taosync
+          echo "taoSync source from local directory"
+          if [ -d ".git" ]; then
+            echo "Commit: $(git log --pretty=format:'%h' -1)"
+            echo "Branch: $(git branch --show-current)"
+          fi
 
-          # 下载 ARM64 StaticX 版本
-          curl -fsSL --retry 3 --retry-delay 5 \
-            "https://github.com/dr34m-cn/taosync/releases/download/${TAOSYNC_VERSION}/taoSync-${TAOSYNC_VERSION}-linux-StaticX-arm64.zip" \
-            -o taosync.zip
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: taosync/web/package-lock.json
 
-          # 解压
-          unzip -q taosync.zip
-          ls -la
+      - name: Build frontend
+        working-directory: taosync/web
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          sed -i "s/__version_placeholder__/$VERSION/g" src/locales/zh-CN.yaml
+          sed -i "s/__version_placeholder__/$VERSION/g" src/locales/en.yaml
+          npm ci
+          npm run build
+          echo "Frontend built"
 
-          # 重命名并复制到系统目录
-          cp -f taoSync system/bin/taosync
+      - name: Prepare frontend for packaging
+        run: |
+          cd taosync
+          rm -rf front
+          cp -r web/dist front
+          test -f front/index.html
+          echo "Frontend copied to front/"
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Build taosync with PyInstaller + StaticX (ARM64)
+        run: |
+          docker run --rm \
+            --platform linux/arm64 \
+            -v "$(pwd)/taosync:/app" \
+            -w /app \
+            arm64v8/python:3.11-slim-bullseye \
+            sh -c '
+              set -e
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                build-essential \
+                zlib1g-dev \
+                patchelf \
+                binutils \
+                zip
+              rm -rf /var/lib/apt/lists/*
+
+              python -m pip install --upgrade pip
+              python -m pip install setuptools wheel scons hatchling
+              python -m pip install --no-build-isolation "pyinstaller>=6,<7" staticx
+              python -m pip install -r requirements.txt
+
+              export LD_LIBRARY_PATH="/usr/local/lib:/usr/lib/aarch64-linux-gnu"
+              python -m PyInstaller taoSync.spec \
+                --distpath /app/dist/arm64 \
+                --workpath /app/build/arm64 \
+                --noconfirm
+
+              staticx "/app/dist/arm64/taoSync" "/app/dist/arm64/taoSync_StaticX"
+              mv -f "/app/dist/arm64/taoSync_StaticX" "/app/dist/arm64/taoSync"
+              chmod 755 "/app/dist/arm64/taoSync"
+              echo "taoSync built successfully"
+            '
+
+      - name: Copy binary to system directory
+        run: |
+          cp -f taosync/dist/arm64/taoSync system/bin/taosync
           chmod 755 system/bin/taosync
+          echo "taoSync binary copied to system/bin/taosync"
 
-          echo "taoSync binary ready"
+      - name: Verify build artifact
+        run: |
+          if [ ! -f "system/bin/taosync" ]; then
+            echo "::error::构建产物 system/bin/taosync 不存在"
+            exit 1
+          fi
+          echo "构建产物验证通过"
 
       - name: Package
         run: |
@@ -73,7 +140,7 @@ jobs:
             -x ".git/*" \
             -x ".github/*" \
             -x ".gitignore" \
-            -x "taosync.zip"
+            -x "taosync/*"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -97,7 +164,7 @@ jobs:
             - Web 管理面板 (端口 8023)
             - 默认密码 `admin`
             - 支持 Magisk v20.4+
-            - 基于 taoSync Linux ARM64 StaticX 版本
+            - 基于 PyInstaller + StaticX 编译 (arm64)
 
             ### 安装
             1. 下载 `taoSync-Magisk-${{ steps.version.outputs.version }}.zip`
