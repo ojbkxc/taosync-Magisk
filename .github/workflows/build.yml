@@ -49,11 +49,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: dr34m/taosync
-          path: /tmp/taosync
+          path: taosync
 
       - name: Show taoSync commit
         run: |
-          cd /tmp/taosync
+          cd taosync
           echo "taoSync cloned at commit: $(git log --pretty=format:'%h' -1)"
 
       - name: Setup Node.js
@@ -62,7 +62,7 @@ jobs:
           node-version: "22.x"
 
       - name: Build frontend
-        working-directory: /tmp/taosync/web
+        working-directory: taosync/web
         run: |
           npm ci
           npm run build
@@ -74,7 +74,7 @@ jobs:
           python-version: "3.11"
 
       - name: Build taoSync with PyInstaller + StaticX
-        working-directory: /tmp/taosync
+        working-directory: taosync
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential zlib1g-dev patchelf binutils
@@ -91,7 +91,7 @@ jobs:
 
       - name: Copy binary to Magisk module
         run: |
-          cp /tmp/taosync/dist/taoSync system/bin/taosync
+          cp taosync/dist/taoSync system/bin/taosync
           chmod +x system/bin/taosync
           echo "Binary copied to system/bin/taosync"
 
