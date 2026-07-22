@@ -12,10 +12,6 @@ LOG_FILE="$CONF_DIR/taosync.log"
 DATA_DIR="$CONF_DIR/data"
 TMP_DIR="$CONF_DIR/tmp"
 
-PYTHON_BIN="/system/bin/python3.11-android"
-TAOSYNC_DIR="/system/lib/taosync"
-TAOSYNC_MAIN="$TAOSYNC_DIR/main.py"
-
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG_FILE"
 }
@@ -26,23 +22,40 @@ mkdir -p "$TMP_DIR"
 chmod 1777 "$TMP_DIR"
 export TMPDIR="$TMP_DIR"
 
+# 创建 /tmp 符号链接指向数据分区（PyInstaller 硬编码了 /tmp 路径）
+if [ -L /tmp ]; then
+  link_target=$(readlink /tmp)
+  if [ "$link_target" != "$TMP_DIR" ]; then
+    rm -f /tmp
+    ln -s "$TMP_DIR" /tmp
+    log "更新 /tmp 符号链接 -> $TMP_DIR"
+  fi
+elif [ -d /tmp ]; then
+  rm -rf /tmp
+  ln -s "$TMP_DIR" /tmp
+  log "替换 /tmp 目录为符号链接 -> $TMP_DIR"
+else
+  ln -s "$TMP_DIR" /tmp
+  log "创建 /tmp 符号链接 -> $TMP_DIR"
+fi
+
 log "=== service.sh 启动 ==="
 
-# 查找 Python 和 taosync
-if [ ! -f "$PYTHON_BIN" ]; then
-  log "错误: 未找到 Python 二进制文件: $PYTHON_BIN"
+# 查找 taosync 二进制（兼容多种位置）
+TAOSYNC_BIN=""
+if [ -f "$MODDIR/taosync_bin" ]; then
+  TAOSYNC_BIN="$MODDIR/taosync_bin"
+elif [ -f "/system/bin/taosync" ]; then
+  TAOSYNC_BIN="/system/bin/taosync"
+else
+  log "错误: 未找到 taosync 二进制文件"
   exit 1
 fi
 
-if [ ! -f "$TAOSYNC_MAIN" ]; then
-  log "错误: 未找到 taosync 主文件: $TAOSYNC_MAIN"
-  exit 1
-fi
-
-chmod 755 "$PYTHON_BIN" 2>/dev/null
-log "Python: $PYTHON_BIN"
-log "taosync: $TAOSYNC_MAIN"
+chmod 755 "$TAOSYNC_BIN" 2>/dev/null
+log "二进制: $TAOSYNC_BIN"
 log "数据目录: $DATA_DIR"
+log "/tmp -> $(readlink /tmp)"
 
 # 启动函数
 start_taosync() {
@@ -51,7 +64,6 @@ start_taosync() {
   chmod 1777 "$TMP_DIR"
 
   # 设置环境变量
-  export PYTHONPATH="$TAOSYNC_DIR"
   export TAO_PASSWORD=admin
   export TAO_PORT=8023
   export TAO_EXPIRES=2
@@ -61,9 +73,9 @@ start_taosync() {
   export TAO_TASK_SAVE=0
   export TAO_TASK_TIMEOUT=72
 
-  # 切换到数据目录并启动
-  cd "$CONF_DIR"
-  "$PYTHON_BIN" "$TAOSYNC_MAIN" >> "$LOG_FILE" 2>&1 &
+  # 切换到数据目录（taoSync 需要相对路径）
+  cd "$DATA_DIR"
+  "$TAOSYNC_BIN" >> "$LOG_FILE" 2>&1 &
   log "taoSync 已启动, PID=$!"
 }
 
@@ -76,12 +88,12 @@ while true; do
 
   # 检测 Magisk 模块是否被禁用
   if [ -f "$MODDIR/disable" ]; then
-    pkill -f "$TAOSYNC_MAIN" 2>/dev/null
+    pkill -f "$TAOSYNC_BIN" 2>/dev/null
     log "检测到模块已禁用，taoSync 已停止"
     exit 0
   fi
 
-  if ! pgrep -f "$TAOSYNC_MAIN" > /dev/null 2>&1; then
+  if ! pgrep -f "$TAOSYNC_BIN" > /dev/null 2>&1; then
     log "taoSync 进程已退出，正在重启..."
     start_taosync
   fi

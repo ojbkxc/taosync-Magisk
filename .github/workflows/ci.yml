@@ -20,134 +20,28 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $VERSION"
 
-      - name: Clone taoSync
-        uses: actions/checkout@v4
-        with:
-          repository: dr34m-cn/taosync
-          path: taosync
-          ref: main
-
-      - name: Show taoSync commit
+      - name: Download taoSync Linux ARM64 StaticX binary
         run: |
-          cd taosync
-          echo "taoSync cloned at commit: $(git log --pretty=format:'%h' -1)"
+          TAOSYNC_VERSION=$(curl -fsSL https://api.github.com/repos/dr34m-cn/taosync/releases/latest | jq -r '.tag_name')
+          echo "taoSync version: $TAOSYNC_VERSION"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22.x"
-          cache: npm
-          cache-dependency-path: taosync/web/package-lock.json
+          curl -fsSL --retry 3 --retry-delay 5 \
+            "https://github.com/dr34m-cn/taosync/releases/download/${TAOSYNC_VERSION}/taoSync-${TAOSYNC_VERSION}-linux-StaticX-arm64.zip" \
+            -o taosync.zip
 
-      - name: Build frontend
-        working-directory: taosync/web
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-          sed -i "s/__version_placeholder__/$VERSION/g" src/locales/zh-CN.yaml
-          sed -i "s/__version_placeholder__/$VERSION/g" src/locales/en.yaml
-          npm ci
-          npm run build
-          echo "Frontend built"
+          unzip -q taosync.zip
+          cp -f taoSync system/bin/taosync
+          chmod 755 system/bin/taosync
 
-      - name: Prepare frontend for p4a
-        run: |
-          cd taosync
-          rm -rf front
-          cp -r web/dist front
-          test -f front/index.html
-          echo "Frontend copied to front/"
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            autoconf automake libtool pkg-config \
-            zlib1g-dev libncurses5-dev libncursesw5-dev \
-            libffi-dev libssl-dev libsqlite3-dev libbz2-dev libreadline-dev \
-            ccache git wget unzip zip \
-            openjdk-17-jdk build-essential
-          sudo ln -sf "$(which python3)" /usr/bin/python
-          echo "ACLOCAL_PATH=/usr/share/aclocal" >> "$GITHUB_ENV"
-
-      - name: Configure Java environment
-        run: |
-          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
-          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
-
-      - name: Install Buildozer & python-for-android
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "buildozer==1.5.0" "python-for-android==2024.01.21" "Cython==0.29.34" virtualenv
-          python -c "import pythonforandroid; print('p4a version:', pythonforandroid.__version__)"
-
-      - name: Cache Buildozer directory
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.buildozer
-            ~/.gradle
-          key: buildozer-${{ runner.os }}-v6-p4a2024.01.21-py311-${{ hashFiles('taosync/buildozer.spec', 'taosync/requirements.txt') }}
-          restore-keys: |
-            buildozer-${{ runner.os }}-v6-p4a2024.01.21-py311-
-
-      - name: Build Android APK with Buildozer
-        working-directory: taosync
-        run: |
-          PYTHONWARNINGS="ignore:Unable to find acceptable character detection:UserWarning" buildozer -v android debug
-
-      - name: Copy python-for-android distribution
-        run: |
-          BUILDOZER_DIST="$HOME/.buildozer/android/platform/build-arm64-v8a/dists"
-          if [ -d "$BUILDOZER_DIST" ]; then
-            for d in "$BUILDOZER_DIST"/*; do
-              if [ -d "$d" ]; then
-                echo "Found dist: $d"
-                cp -r "$d" ../python_dist
-                break
-              fi
-            done
-          fi
-
-          if [ ! -d "../python_dist" ]; then
-            echo "ERROR: python_dist not found"
-            exit 1
-          fi
-
-          ls -la ../python_dist
+          echo "taoSync binary ready"
 
       - name: Verify build artifact
         run: |
-          if [ ! -d "../python_dist" ]; then
-            echo "::error::构建产物 python_dist 不存在"
+          if [ ! -f "system/bin/taosync" ]; then
+            echo "::error::构建产物 system/bin/taosync 不存在"
             exit 1
           fi
           echo "构建产物验证通过"
-
-      - name: Copy to Magisk module
-        run: |
-          mkdir -p system/bin
-          mkdir -p system/lib/python3.11
-          mkdir -p system/lib/taosync
-
-          cp ../python_dist/bin/python3 system/bin/python3.11-android
-          chmod 755 system/bin/python3.11-android
-
-          cp -r ../python_dist/lib/python3.11/site-packages system/lib/python3.11/
-
-          cp -r taosync/common system/lib/taosync/
-          cp -r taosync/controller system/lib/taosync/
-          cp -r taosync/mapper system/lib/taosync/
-          cp -r taosync/service system/lib/taosync/
-          cp -r taosync/front system/lib/taosync/
-          cp -r taosync/locales system/lib/taosync/
-          cp taosync/main.py system/lib/taosync/
-
-          echo "Files copied to system/"
 
       - name: Package
         run: |
@@ -156,8 +50,7 @@ jobs:
             -x ".git/*" \
             -x ".github/*" \
             -x ".gitignore" \
-            -x "taosync/*" \
-            -x "python_dist/*"
+            -x "taosync.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
