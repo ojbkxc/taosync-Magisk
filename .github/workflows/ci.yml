@@ -23,8 +23,9 @@ jobs:
       - name: Clone taoSync
         uses: actions/checkout@v4
         with:
-          repository: dr34m/taosync
+          repository: dr34m-cn/taosync
           path: taosync
+          ref: main
 
       - name: Show taoSync commit
         run: |
@@ -35,10 +36,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22.x"
+          cache: npm
+          cache-dependency-path: taosync/web/package-lock.json
 
       - name: Build frontend
         working-directory: taosync/web
         run: |
+          VERSION=${{ steps.version.outputs.version }}
+          sed -i "s/__version_placeholder__/$VERSION/g" src/locales/zh-CN.yaml
+          sed -i "s/__version_placeholder__/$VERSION/g" src/locales/en.yaml
           npm ci
           npm run build
           echo "Frontend built"
@@ -76,7 +82,8 @@ jobs:
           zip -r taoSync-Magisk-${VERSION}-ci.zip . \
             -x ".git/*" \
             -x ".github/*" \
-            -x ".gitignore"
+            -x ".gitignore" \
+            -x "taosync/*"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
