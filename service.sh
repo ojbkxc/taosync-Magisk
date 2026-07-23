@@ -73,8 +73,9 @@ start_taosync() {
   export TAO_TASK_SAVE=0
   export TAO_TASK_TIMEOUT=72
 
-  # 切换到数据目录（taoSync 需要相对路径）
-  cd "$DATA_DIR"
+  # CWD = CONF_DIR（不是 DATA_DIR），这样 onStart.init() 创建的 data/ 即为 DATA_DIR
+  # 与 Docker WORKDIR /app 的行为一致
+  cd "$CONF_DIR"
   "$TAOSYNC_BIN" >> "$LOG_FILE" 2>&1 &
   log "taoSync 已启动, PID=$!"
 }

@@ -18,6 +18,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
 
       - name: Update version
         id: version
@@ -48,8 +50,8 @@ jobs:
       - name: Show taoSync source info
         run: |
           cd taosync
-          echo "taoSync source from local directory"
-          if [ -d ".git" ]; then
+          echo "taoSync source (submodule)"
+          if [ -e ".git" ]; then
             echo "Commit: $(git log --pretty=format:'%h' -1)"
             echo "Branch: $(git branch --show-current)"
           fi
@@ -121,6 +123,7 @@ jobs:
 
       - name: Copy binary to system directory
         run: |
+          mkdir -p system/bin
           cp -f taosync/dist/arm64/taoSync system/bin/taosync
           chmod 755 system/bin/taosync
           echo "taoSync binary copied to system/bin/taosync"
@@ -140,6 +143,7 @@ jobs:
             -x ".git/*" \
             -x ".github/*" \
             -x ".gitignore" \
+            -x ".gitmodules" \
             -x "taosync/*"
 
       - name: Upload artifact

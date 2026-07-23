@@ -1,0 +1,3 @@
+[submodule "taosync"]
+	path = taosync
+	url = https://github.com/ojbkxc/taosync.git

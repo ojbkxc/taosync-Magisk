@@ -6,14 +6,9 @@ build/
 .DS_Store
 
 # Build artifacts
-system/bin/taosync
-system/bin/alist
+system/bin/
 
 # Node modules and frontend build
 node_modules/
 web/dist/
 front/
-
-# PyInstaller build outputs
-taosync/dist/
-taosync/build/
